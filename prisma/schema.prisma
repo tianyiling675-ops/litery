@@ -1,0 +1,448 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// 用户表 - 支持多租户架构
+model User {
+  id                String    @id @default(uuid())
+  email             String    @unique @db.VarChar(255)
+  passwordHash      String    @map("password_hash") @db.VarChar(255)
+  name              String    @db.VarChar(100)
+  role              UserRole  @default(USER)
+  avatarUrl         String?   @map("avatar_url") @db.VarChar(500)
+  profile           Json      @default("{}")
+  usageStats        Json      @map("usage_stats") @default("{}")
+  isActive          Boolean   @default(true) @map("is_active")
+  lastLoginAt       DateTime? @map("last_login_at") @db.Timestamptz()
+  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt         DateTime  @updatedAt @map("updated_at") @db.Timestamptz()
+  
+  // 多租户支持
+  tenantId          String    @map("tenant_id") @db.VarChar(100)
+  organizationId    String?   @map("organization_id") @db.VarChar(100)
+  
+  // 关系
+  algorithms        Algorithm[]
+  tasks             Task[]
+  orders            Order[]
+  files             File[]
+  reviews           Review[]
+  apiKeys           ApiKey[]
+  subscriptions     Subscription[]
+  
+  @@index([email])
+  @@index([role])
+  @@index([tenantId])
+  @@index([organizationId])
+  @@index([createdAt])
+  @@map("users")
+}
+
+// 算法表
+model Algorithm {
+  id                String          @id @default(uuid())
+  userId            String          @map("user_id")
+  name              String          @db.VarChar(200)
+  description       String          @db.Text
+  category          String          @db.VarChar(50)
+  subcategory       String?         @db.VarChar(50)
+  parameters        Json            @default("{}")
+  price             Decimal         @default(0) @db.Decimal(10, 2)
+  currency          String          @default("CNY") @db.VarChar(3)
+  status            AlgorithmStatus @default(DRAFT)
+  tags              String[]        @default([])
+  downloadCount     Int             @default(0) @map("download_count")
+  rating            Decimal         @default(0) @db.Decimal(3, 2)
+  reviewCount       Int             @default(0) @map("review_count")
+  codeFilePath      String?         @map("code_file_path") @db.VarChar(500)
+  documentationUrl  String?         @map("documentation_url") @db.VarChar(500)
+  demoDataUrl       String?         @map("demo_data_url") @db.VarChar(500)
+  version           String          @default("1.0.0") @db.VarChar(20)
+  requirements      Json            @default("{}")
+  metadata          Json            @default("{}")
+  
+  // 多租户支持
+  tenantId          String          @map("tenant_id") @db.VarChar(100)
+  visibility        Visibility      @default(PUBLIC)
+  
+  createdAt         DateTime        @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt         DateTime        @updatedAt @map("updated_at") @db.Timestamptz()
+  publishedAt       DateTime?       @map("published_at") @db.Timestamptz()
+  
+  // 关系
+  user              User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tasks             Task[]
+  orders            OrderItem[]
+  reviews           Review[]
+  algorithmVersions AlgorithmVersion[]
+  
+  @@index([userId])
+  @@index([category])
+  @@index([status])
+  @@index([price])
+  @@index([rating])
+  @@index([tenantId])
+  @@index([createdAt])
+  @@index([tags])
+  @@map("algorithms")
+}
+
+// 算法版本表 - 支持版本控制
+model AlgorithmVersion {
+  id            String    @id @default(uuid())
+  algorithmId   String    @map("algorithm_id")
+  version       String    @db.VarChar(20)
+  description   String?
+  codeFilePath  String    @map("code_file_path") @db.VarChar(500)
+  parameters    Json      @default("{}")
+  requirements  Json      @default("{}")
+  isActive      Boolean   @default(false) @map("is_active")
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz()
+  
+  algorithm     Algorithm @relation(fields: [algorithmId], references: [id], onDelete: Cascade)
+  
+  @@unique([algorithmId, version])
+  @@index([algorithmId])
+  @@map("algorithm_versions")
+}
+
+// 任务表
+model Task {
+  id                String      @id @default(uuid())
+  userId            String      @map("user_id")
+  algorithmId       String      @map("algorithm_id")
+  name              String      @db.VarChar(200)
+  description       String?
+  parameters        Json        @default("{}")
+  inputFiles        String[]    @map("input_files") @default([])
+  outputFiles       String[]    @map("output_files") @default([])
+  status            TaskStatus  @default(PENDING)
+  priority          Int         @default(5)
+  progress          Int         @default(0)
+  startTime         DateTime?   @map("start_time") @db.Timestamptz()
+  endTime           DateTime?   @map("end_time") @db.Timestamptz()
+  estimatedDuration Int?        @map("estimated_duration")
+  actualDuration    Int?        @map("actual_duration")
+  resourceUsage     Json        @map("resource_usage") @default("{}")
+  errorMessage      String?     @map("error_message")
+  retryCount        Int         @default(0) @map("retry_count")
+  maxRetries        Int         @default(3) @map("max_retries")
+  scheduleConfig    Json        @map("schedule_config") @default("{}")
+  executionConfig   Json        @map("execution_config") @default("{}")
+  cost              Decimal     @default(0) @db.Decimal(10, 2)
+  
+  // 多租户支持
+  tenantId          String      @map("tenant_id") @db.VarChar(100)
+  
+  createdAt         DateTime    @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt         DateTime    @updatedAt @map("updated_at") @db.Timestamptz()
+  
+  // 关系
+  user              User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  algorithm         Algorithm   @relation(fields: [algorithmId], references: [id], onDelete: Cascade)
+  taskLogs          TaskLog[]
+  resultFiles       ResultFile[]
+  
+  @@index([userId])
+  @@index([algorithmId])
+  @@index([status])
+  @@index([tenantId])
+  @@index([createdAt])
+  @@index([startTime])
+  @@map("tasks")
+}
+
+// 任务日志表
+model TaskLog {
+  id          String      @id @default(uuid())
+  taskId      String      @map("task_id")
+  logLevel    LogLevel    @map("log_level") @default(INFO)
+  message     String      @db.Text
+  context     Json        @default("{}")
+  createdAt   DateTime    @default(now()) @map("created_at") @db.Timestamptz()
+  
+  task        Task        @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  
+  @@index([taskId])
+  @@index([createdAt])
+  @@map("task_logs")
+}
+
+// 文件表
+model File {
+  id            String        @id @default(uuid())
+  userId        String        @map("user_id")
+  originalName  String        @map("original_name") @db.VarChar(255)
+  fileName      String        @map("file_name") @db.VarChar(255)
+  fileType      String        @map("file_type") @db.VarChar(100)
+  fileSize      BigInt        @map("file_size")
+  filePath      String        @map("file_path") @db.VarChar(500)
+  storageType   StorageType   @default(LOCAL) @map("storage_type")
+  mimeType      String?       @map("mime_type") @db.VarChar(100)
+  checksum      String?       @db.VarChar(64)
+  metadata      Json          @default("{}")
+  isPublic      Boolean       @default(false) @map("is_public")
+  downloadCount Int           @default(0) @map("download_count")
+  expiresAt     DateTime?     @map("expires_at") @db.Timestamptz()
+  
+  // 多租户支持
+  tenantId      String        @map("tenant_id") @db.VarChar(100)
+  
+  createdAt     DateTime      @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt     DateTime      @updatedAt @map("updated_at") @db.Timestamptz()
+  
+  // 关系
+  user          User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  resultFiles   ResultFile[]
+  
+  @@index([userId])
+  @@index([fileType])
+  @@index([tenantId])
+  @@index([createdAt])
+  @@index([storageType])
+  @@map("files")
+}
+
+// 结果文件表
+model ResultFile {
+  id          String    @id @default(uuid())
+  taskId      String    @map("task_id")
+  fileId      String    @map("file_id")
+  resultType  String    @map("result_type")
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz()
+  
+  task        Task      @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  file        File      @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  
+  @@unique([taskId, fileId])
+  @@index([taskId])
+  @@index([fileId])
+  @@map("result_files")
+}
+
+// 订单表
+model Order {
+  id            String        @id @default(uuid())
+  userId        String        @map("user_id")
+  orderNo       String        @unique @map("order_no") @db.VarChar(50)
+  amount        Decimal       @db.Decimal(10, 2)
+  currency      String        @default("CNY") @db.VarChar(3)
+  status        OrderStatus   @default(PENDING)
+  items         Json          @default("{}")
+  paymentId     String?       @map("payment_id")
+  invoiceUrl    String?       @map("invoice_url") @db.VarChar(500)
+  metadata      Json          @default("{}")
+  
+  // 多租户支持
+  tenantId      String        @map("tenant_id") @db.VarChar(100)
+  
+  createdAt     DateTime      @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt     DateTime      @updatedAt @map("updated_at") @db.Timestamptz()
+  paidAt        DateTime?     @map("paid_at") @db.Timestamptz()
+  
+  // 关系
+  user          User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  orderItems    OrderItem[]
+  payment       Payment?
+  
+  @@index([userId])
+  @@index([orderNo])
+  @@index([status])
+  @@index([tenantId])
+  @@index([createdAt])
+  @@map("orders")
+}
+
+// 订单项表
+model OrderItem {
+  id            String    @id @default(uuid())
+  orderId       String    @map("order_id")
+  algorithmId   String    @map("algorithm_id")
+  quantity      Int       @default(1)
+  unitPrice     Decimal   @map("unit_price") @db.Decimal(10, 2)
+  totalPrice    Decimal   @map("total_price") @db.Decimal(10, 2)
+  licenseType   String    @map("license_type") @db.VarChar(50)
+  expiresAt     DateTime? @map("expires_at") @db.Timestamptz()
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz()
+  
+  order         Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  algorithm     Algorithm @relation(fields: [algorithmId], references: [id], onDelete: Cascade)
+  
+  @@index([orderId])
+  @@index([algorithmId])
+  @@map("order_items")
+}
+
+// 支付表
+model Payment {
+  id              String        @id @default(uuid())
+  orderId         String        @unique @map("order_id")
+  paymentMethod   String        @map("payment_method") @db.VarChar(50)
+  transactionId   String?       @map("transaction_id") @db.VarChar(100)
+  amount          Decimal       @db.Decimal(10, 2)
+  currency        String        @default("CNY") @db.VarChar(3)
+  status          PaymentStatus @default(PENDING)
+  gatewayResponse Json?         @map("gateway_response")
+  metadata        Json          @default("{}")
+  
+  createdAt       DateTime      @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt       DateTime      @updatedAt @map("updated_at") @db.Timestamptz()
+  
+  order           Order         @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  
+  @@index([orderId])
+  @@index([status])
+  @@index([transactionId])
+  @@map("payments")
+}
+
+// 评价表
+model Review {
+  id          String      @id @default(uuid())
+  userId      String      @map("user_id")
+  algorithmId String      @map("algorithm_id")
+  rating      Int         @db.SmallInt
+  comment     String      @db.Text
+  isVerified  Boolean     @default(false) @map("is_verified")
+  createdAt   DateTime    @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt   DateTime    @updatedAt @map("updated_at") @db.Timestamptz()
+  
+  // 关系
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  algorithm   Algorithm   @relation(fields: [algorithmId], references: [id], onDelete: Cascade)
+  
+  @@unique([userId, algorithmId])
+  @@index([algorithmId])
+  @@index([rating])
+  @@index([createdAt])
+  @@map("reviews")
+}
+
+// API密钥表 - 支持API访问
+model ApiKey {
+  id          String      @id @default(uuid())
+  userId      String      @map("user_id")
+  name        String      @db.VarChar(100)
+  key         String      @unique @db.VarChar(255)
+  permissions Json        @default("{}")
+  isActive    Boolean     @default(true) @map("is_active")
+  expiresAt   DateTime?   @map("expires_at") @db.Timestamptz()
+  lastUsedAt  DateTime?   @map("last_used_at") @db.Timestamptz()
+  
+  // 多租户支持
+  tenantId    String      @map("tenant_id") @db.VarChar(100)
+  
+  createdAt   DateTime    @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt   DateTime    @updatedAt @map("updated_at") @db.Timestamptz()
+  
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@index([userId])
+  @@index([key])
+  @@index([tenantId])
+  @@map("api_keys")
+}
+
+// 订阅表 - 支持订阅模式
+model Subscription {
+  id              String            @id @default(uuid())
+  userId          String            @map("user_id")
+  planId          String            @map("plan_id") @db.VarChar(100)
+  planName        String            @map("plan_name") @db.VarChar(100)
+  status          SubscriptionStatus  @default(ACTIVE)
+  currentPeriodStart  DateTime      @map("current_period_start") @db.Timestamptz()
+  currentPeriodEnd    DateTime      @map("current_period_end") @db.Timestamptz()
+  cancelAtPeriodEnd   Boolean       @default(false) @map("cancel_at_period_end")
+  metadata        Json              @default("{}")
+  
+  // 多租户支持
+  tenantId        String            @map("tenant_id") @db.VarChar(100)
+  
+  createdAt       DateTime          @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt       DateTime          @updatedAt @map("updated_at") @db.Timestamptz()
+  cancelledAt     DateTime?         @map("cancelled_at") @db.Timestamptz()
+  
+  user            User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@index([userId])
+  @@index([status])
+  @@index([tenantId])
+  @@index([currentPeriodEnd])
+  @@map("subscriptions")
+}
+
+// 枚举定义
+enum UserRole {
+  USER      @map("user")
+  PREMIUM   @map("premium")
+  ENTERPRISE @map("enterprise")
+  ADMIN     @map("admin")
+}
+
+enum AlgorithmStatus {
+  DRAFT     @map("draft")
+  PENDING   @map("pending")
+  APPROVED  @map("approved")
+  REJECTED  @map("rejected")
+  SUSPENDED @map("suspended")
+}
+
+enum Visibility {
+  PUBLIC   @map("public")
+  PRIVATE  @map("private")
+  INTERNAL @map("internal")
+}
+
+enum TaskStatus {
+  PENDING   @map("pending")
+  QUEUED    @map("queued")
+  RUNNING   @map("running")
+  COMPLETED @map("completed")
+  FAILED    @map("failed")
+  CANCELLED @map("cancelled")
+}
+
+enum LogLevel {
+  DEBUG     @map("debug")
+  INFO      @map("info")
+  WARNING   @map("warning")
+  ERROR     @map("error")
+}
+
+enum StorageType {
+  LOCAL     @map("local")
+  OSS       @map("oss")
+  S3        @map("s3")
+  COS       @map("cos")
+}
+
+enum OrderStatus {
+  PENDING   @map("pending")
+  PAID      @map("paid")
+  CANCELLED @map("cancelled")
+  REFUNDED  @map("refunded")
+}
+
+enum PaymentStatus {
+  PENDING   @map("pending")
+  SUCCESS   @map("success")
+  FAILED    @map("failed")
+  CANCELLED @map("cancelled")
+  REFUNDED  @map("refunded")
+}
+
+enum SubscriptionStatus {
+  ACTIVE    @map("active")
+  CANCELLED @map("cancelled")
+  PAST_DUE  @map("past_due")
+  UNPAID    @map("unpaid")
+  EXPIRED   @map("expired")
+}
